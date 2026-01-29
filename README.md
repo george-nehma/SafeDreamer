@@ -25,6 +25,13 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
     # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
     python -m pip install -e source/SafeDreamer
 
+## DreamerV3 dependencies
+
+- Install ruamel.yaml version 0.17.3 with `pip install ruamel.yaml==0.17.3`.
+  
+- Install git-lfs for tracking the textures, models, and usd files with `apt install git-lfs -y`
+- Ensure to install with `git lfs install`
+
 - Verify that the extension is correctly installed by:
 
     - Listing the available tasks:
@@ -37,11 +44,11 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
         python scripts/list_envs.py
         ```
 
-    - Running a task:
+    - Running the DreamLander Environment:
 
         ```bash
         # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
+        python scripts/dreamer/train.py --task=Isaac-PlanetaryLander-Direct-6DOF-v0 --num_envs=8 --enable_cameras
         ```
 
     - Running a task with dummy agents:
