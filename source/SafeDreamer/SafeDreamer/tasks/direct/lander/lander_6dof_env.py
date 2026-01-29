@@ -272,7 +272,7 @@ class Lander6DOFEnv(DirectRLEnv):
         # add lights
         light_cfg = sim_utils.DomeLightCfg(intensity=1000.0, 
                                            color=(0.75, 0.75, 0.75),
-                                           texture_file ="/workspace/isaaclab/source/lander_assets/HDR_white_local_star.hdr",
+                                           texture_file ="/workspace/SafeDreamer/source/lander_assets/HDR_white_local_star.hdr",
                                            texture_format = "latlong",)
         light_cfg.func("/World/Light", light_cfg)
         dlight_cfg = sim_utils.DistantLightCfg(intensity=1000.0)
@@ -329,33 +329,29 @@ class Lander6DOFEnv(DirectRLEnv):
             dim=1
         )
 
-        reward = self._get_rewards()
-
-        ended, time_out = self._get_dones()
-        
-        is_last = time_out
-        is_terminal = ended
-        is_first = (self.episode_length_buf == self.episode_init)
-            
-        # dones = {"is_first": is_first, "is_last": is_last, "is_terminal": is_terminal}#, "is_landed": self._landed, "is_crashed": self._crashed}     
-        
-        observations = {"state": obs, "reward": reward}
+        observations = {"state": obs}
         # observations.update(dones) 
-        self.extras["is_first"] = is_first
-        self.extras["is_last"] = is_last
-        self.extras["is_terminal"] = is_terminal     
-        return observations
-    
-    def _get_rewards(self) -> torch.Tensor:
+        self.extras["is_first"] = (self.episode_length_buf == self.episode_init)    
 
-        contact = self._contact_sensor.data.current_contact_time.squeeze(1)
-        
-        self._mpower = (self._actions[:,2] != 0).to(dtype=torch.int, device=self.device) 
-        self._spower = (self._actions[:, :2] != 0).any(dim=1).to(dtype=torch.int, device=self.device)
-    
-        reward = torch.zeros(self.num_envs, device=self.device)
 
-        # --- Attitude Reward ---
+        # --- Terminal conditions ---
+        self._alt_ok = self._altitude <= 2.0
+        self._vel_ok = torch.norm(self._lin_vel, dim=1) < self.cfg.vlim
+        self._pos_ok = torch.norm(self._pos[:, :2], dim=1) < self.cfg.rlim
+        no_contact = self._contact <= 0.1
+        self._hovering = self._alt_ok & self._vel_ok & self._pos_ok & no_contact
+
+        # --- Landed conditions ---
+        vel_landed = torch.abs(self._lin_vel[:, 2]) < self.cfg.vlim
+        contact_landed = self._vel_ok & (self._contact > 0.5)
+        self._landed = self._pos_ok & contact_landed
+
+        # --- Crashed conditions ---
+        hard_landing = (self._contact > 0.0) & self._alt_ok & (~vel_landed)
+        self._crashed = hard_landing
+
+
+        # --- Attitude alignment ---
         q_des = torch.tensor([1.0, 0.0, 0.0, 0.0], device=self.device).expand(self.num_envs, -1)
         q_conj = torch.cat([self._quat[:, 0:1], -self._quat[:, 1:]], dim=1)
         e_q0 = q_conj[:, 0:1] * q_des[:, 0:1] - torch.sum(q_conj[:, 1:] * q_des[:, 1:], dim=1, keepdim=True)
@@ -366,13 +362,21 @@ class Lander6DOFEnv(DirectRLEnv):
         self.omega = torch.norm(self._ang_vel, dim=1)
         self._alignment_prev = self.alignment.clone()
 
-        # --- Alignment conditions ---
+        # --- Alignment history ---
         self.aligned_history = torch.roll(self.aligned_history, shifts=-1, dims=1)
         self.aligned_history[:, -1] = self._aligned
 
-        norm_actions = torch.norm(self._actions[:,3:], dim=1)/torch.tensor(self.actionHigh[:,3],device=self.device) # moment RCS penalty
+        return observations
+    
+    def _get_rewards(self) -> torch.Tensor:
+        
+        self._mpower = (self._actions[:,2] != 0).to(dtype=torch.int, device=self.device) 
+        self._spower = (self._actions[:, :2] != 0).any(dim=1).to(dtype=torch.int, device=self.device)
+    
+        reward = torch.zeros(self.num_envs, device=self.device)
 
         # --- Attitude reward ---
+        norm_actions = torch.norm(self._actions[:,3:], dim=1)/torch.tensor(self.actionHigh[:,3],device=self.device) # moment RCS penalty
         alignment_penalty = (1/10)-1/(10*torch.exp(-self.alignment/(0.4)))
         rcs_penalty = -0.3*norm_actions
         ang_vel_penalty = -0.05 * (self._ang_vel.abs().sum(dim=1))
@@ -381,26 +385,7 @@ class Lander6DOFEnv(DirectRLEnv):
         reward += rcs_penalty
         reward += ang_vel_penalty
 
-
         # --- Translational reward ---
-        
-        # --- Hovering conditions ---
-        alt_ok = self._altitude <= 2.0
-        vel_ok = torch.norm(self._lin_vel, dim=1) < self.cfg.vlim
-        pos_ok = torch.norm(self._pos[:, :2], dim=1) < self.cfg.rlim
-        no_contact = contact <= 0.1
-        self._hovering = alt_ok & vel_ok & pos_ok & no_contact
-
-        # --- Landed conditions ---
-        vel_landed = torch.abs(self._lin_vel[:, 2]) < self.cfg.vlim
-        contact_landed = vel_ok & (contact > 0.5)
-        self._landed = pos_ok & contact_landed
-
-        hard_landing = (contact > 0.0) & alt_ok & (~vel_landed)
-        self._crashed = hard_landing
-
-        # alt = torch.clamp(self._altitude, min=10.0)
-
         w_xy = 5
         w_z = 1
         
@@ -424,16 +409,12 @@ class Lander6DOFEnv(DirectRLEnv):
         rcs_translation_pen = -0.001*torch.norm(self._actions[:,:2], dim=1)/torch.tensor(self.actionHigh[:,0],device=self.device)
         reward += main_engine_pen + rcs_translation_pen
 
-        self.out_of_bounds_x = torch.logical_or(self._robot.data.root_pos_w[:,0] > 40, self._robot.data.root_pos_w[:,0] < -40)
-        self.out_of_bounds_y = torch.logical_or(self._robot.data.root_pos_w[:,1] > 40, self._robot.data.root_pos_w[:,1] < -40)
-        self.out_of_bounds = torch.logical_or(self.out_of_bounds_x, self.out_of_bounds_y)
-
         # --- Penalties and Bonuses ---
         reward[self._landed] += 20
         reward[~self._aligned & self._crashed] -= 10
         # hovering_pen = 0.00001*self._actions[(pos_ok & (self._altitude<1.0)),2]
         # reward[(pos_ok & (self._altitude<1.0))] -= hovering_pen
-        # reward[(~self._aligned & (self._altitude<5.0))] -= 0.01
+        reward[(~self._aligned & (self._altitude<5.0))] -= 0.01
 
         reward[self._aligned & self._landed] += 50
 
@@ -467,15 +448,15 @@ class Lander6DOFEnv(DirectRLEnv):
         for key, value in rewards.items():
             self._episode_sums[key] += value
 
-        if self._landed.any() or self._crashed.any():
-            with torch.no_grad():
+        # Bonus/Penalty events
+        self.landed_hist += (self._landed).sum().item()
+        self.hard_landing_hist += (self._crashed & ~self._vel_ok & self._pos_ok).sum().item()
+        self.missed_hist += (self._landed & self._aligned).sum().item()
+        self.aligned_hist += (self._aligned).sum().item()
+        self.crashed_hist += (self._crashed).sum().item()
 
-                # Bonus/Penalty events
-                self.landed_hist += (self._landed).sum().item()
-                self.hard_landing_hist += (hard_landing & ~vel_ok & pos_ok).sum().item()
-                self.missed_hist += (self._landed & self._aligned).sum().item()
-                self.aligned_hist += (self._aligned).sum().item()
-                self.crashed_hist += (self._crashed).sum().item()
+        if self._landed.any().item() or self._crashed.any().item():
+            with torch.no_grad():
 
                 # Summary statistics (mean/std)
                 # print(f"\n=== Reward Diagnostics ===")
@@ -501,7 +482,9 @@ class Lander6DOFEnv(DirectRLEnv):
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         self.time_out = (self.episode_length_buf >= self.max_episode_length - 1)
 
-        
+        self.out_of_bounds_x = torch.logical_or(self._robot.data.root_pos_w[:,0] > 40, self._robot.data.root_pos_w[:,0] < -40)
+        self.out_of_bounds_y = torch.logical_or(self._robot.data.root_pos_w[:,1] > 40, self._robot.data.root_pos_w[:,1] < -40)
+        self.out_of_bounds = torch.logical_or(self.out_of_bounds_x, self.out_of_bounds_y)
 
         # self.terminated = torch.logical_or(self._crashed, self._missed)
         self.terminated = torch.logical_or(self._crashed, self._landed)

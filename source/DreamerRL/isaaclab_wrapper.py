@@ -71,6 +71,7 @@ class IsaacLabDreamerWrapper(gym.Wrapper):
     def reset(self, **kwargs):
         obs, extras = self.env.reset(**kwargs)
         self._episode_step[:] = 0
+        obs["reward"] = torch.zeros_like(extras["is_first"], dtype=torch.float32)
         obs['is_first'] = extras["is_first"]
         obs['is_last'] = extras["is_last"]
         obs['is_terminal'] = extras["is_terminal"]
@@ -83,9 +84,10 @@ class IsaacLabDreamerWrapper(gym.Wrapper):
             action = torch.from_numpy(action).to(self.env.env.device)
 
         obs, reward, terminated, reset, extras = self.env.step(action)
+        obs['reward'] = reward
         obs['is_first'] = extras["is_first"]
-        obs['is_last'] = extras["is_last"]
-        obs['is_terminal'] = extras["is_terminal"]
+        obs['is_last'] = reset
+        obs['is_terminal'] = terminated
         done = terminated | reset
         processed_obs = self._process_observation(obs)
 

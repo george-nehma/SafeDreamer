@@ -89,7 +89,7 @@ os.environ["MUJOCO_GL"] = "osmesa"
 import numpy as np
 import ruamel.yaml as yaml
 
-isaaclab_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+isaaclab_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.insert(0, isaaclab_root)
 
 from source.DreamerRL import exploration as expl
@@ -98,7 +98,7 @@ from source.DreamerRL import tools
 from source.DreamerRL.envs import wrappers
 from source.DreamerRL.parallel import Damy
 
-from scripts.reinforcement_learning.dreamer.plot import plot_landing, plot_multiple
+from scripts.dreamer.plot import plot_landing, plot_multiple
 
 import torch
 from torch import nn
@@ -125,6 +125,7 @@ from isaaclab.utils.dict import print_dict
 from source.DreamerRL.isaaclab_wrapper import IsaacLabDreamerWrapper
 
 import isaaclab_tasks  # noqa: F401
+import SafeDreamer.tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -483,7 +484,7 @@ if __name__ == "__main__":
         task = "cartpole_direct"
     elif args_cli.task.startswith('Isaac-Cartpole-RGB-Camera-Direct-'):
         task = "cartpole_camera_direct"
-    log_root_path = os.path.join("logs", "IsaacLab", task)
+    log_root_path = os.path.join("logs", task)
     log_root_path = os.path.abspath(log_root_path)
     print(f"[INFO] Loading experiment from directory: {log_root_path}")
     # get checkpoint path
