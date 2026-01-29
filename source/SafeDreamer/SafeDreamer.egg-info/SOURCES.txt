@@ -1,0 +1,10 @@
+pyproject.toml
+setup.py
+SafeDreamer/__init__.py
+SafeDreamer/ui_extension_example.py
+SafeDreamer.egg-info/PKG-INFO
+SafeDreamer.egg-info/SOURCES.txt
+SafeDreamer.egg-info/dependency_links.txt
+SafeDreamer.egg-info/not-zip-safe
+SafeDreamer.egg-info/requires.txt
+SafeDreamer.egg-info/top_level.txt
