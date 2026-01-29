@@ -31,6 +31,7 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
   
 - Install git-lfs for tracking the textures, models, and usd files with `apt install git-lfs -y`
 - Ensure to install with `git lfs install`
+- Fetch and checkout the LFS files `lfs fetch --all` followed by `lfs checkout`
 
 - Verify that the extension is correctly installed by:
 
