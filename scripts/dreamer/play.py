@@ -125,7 +125,7 @@ from isaaclab.utils.dict import print_dict
 from source.DreamerRL.isaaclab_wrapper import IsaacLabDreamerWrapper
 
 import isaaclab_tasks  # noqa: F401
-import SafeDreamer.tasks  # noqa: F401
+import SafeDreamer.tasks
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
@@ -373,7 +373,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     except AttributeError:
         dt = test_env.unwrapped.step_dt
 
-    num_runs = 20
+    num_runs = 10
     all_results = []  # will store results of all simulations
 
     for run_idx in range(num_runs):

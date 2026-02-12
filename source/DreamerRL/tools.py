@@ -149,26 +149,28 @@ def simulate(
         agent_state = None
         reward = [0] * num_envs
     else:
-        step, episode, done, length, obs, agent_state, reward = state
+        step, episode, done, length, obs, agent_state, reward, results = state
     while (steps and step < steps) or (episodes and episode < episodes):
         # reset envs if necessary
         if done.any():                                             # check if any env is done
             indices = [index for index, d in enumerate(done) if d]      # find indices of done envs
             old_env_ids = [envs[i]._env.id for i in range(num_envs)]  # store old env ids
-            r = envs[0].reset()               # reset done envs
-            results = r()                        # call the reset functions
+            if len(indices) == num_envs: # and episode == 0: # only call on very first run through
+                r = envs[0].reset()               # reset done envs
+                results = r()                        # call the reset functions
+            else:
+                results = results[0][3]['reset_obs']
+
 
             # only for dummy envs
             for i, idx in enumerate(indices):
-                if idx != 0:
-                    timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-                    envs[idx]._env.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
+                # if idx != 0:
+                timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+                envs[idx]._env.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
             if len(indices) < num_envs:
-                others = [i for i in range(4) if i not in indices]
+                others = [i for i in range(num_envs) if i not in indices] ## was 4 but should be num_envs??
                 for i in others:
                     envs[i]._env.id = old_env_ids[i]
-            # [envs[i]._env.reset() for i, flag in enumerate(indices) if flag != 0]
-
 
 
             # results = results[0]
@@ -283,7 +285,7 @@ def simulate(
         while len(cache) > 5:
             # FIFO
             cache.popitem(last=False)
-    return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
+    return (step - steps, episode - episodes, done, length, obs, agent_state, reward, results)
 
 
 def add_to_cache(cache, id, transition):

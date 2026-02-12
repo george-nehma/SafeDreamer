@@ -11,6 +11,9 @@ class TimeLimit(gym.Wrapper):
         self._step = None
 
     def step(self, action):
+        if hasattr(self.env.env.env.env, "obs_buf"):
+            if self.env.env.env.env.obs_buf['is_first'].any() == True: # needed because reset is handled in direct_rl_env
+                self._step = 0
         assert self._step is not None, "Must reset environment."
         obs, reward, done, info = self.env.step(action)
         self._step += 1
