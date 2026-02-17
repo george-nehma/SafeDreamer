@@ -173,8 +173,9 @@ def simulate(
                     envs[i]._env.id = old_env_ids[i]
 
 
-            # results = results[0]
-            for index, result in zip(indices, results): # replacing obs with reset results
+            # for index, result in zip(indices, results): # replacing obs with reset results
+            for index in indices: # replacing obs with reset results
+                result = results[index]
                 t = result.copy()
                 t = {k: convert(v) for k, v in t.items()}
                 # action will be added to transition in add_to_cache

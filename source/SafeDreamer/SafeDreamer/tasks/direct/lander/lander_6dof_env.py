@@ -392,14 +392,16 @@ class Lander6DOFEnv(DirectRLEnv):
 
         # --- Penalties and Bonuses ---
         reward[self._landed] += 20
-        reward[~self._aligned & self._crashed] -= 10
+        reward[self._crashed] -= 20
+        reward[self._hard_landing] -= 40
+        reward[self._missed] -= 5
         # hovering_pen = 0.00001*self._actions[(pos_ok & (self._altitude<1.0)),2]
         # reward[(pos_ok & (self._altitude<1.0))] -= hovering_pen
-        reward[(~self._aligned & (self._altitude<5.0))] -= 0.01
+        reward[((torch.abs(self._lin_vel[:,2]) > self.cfg.vlim) & (self._altitude<5.0))] -= 0.01
 
         reward[self._aligned & self._landed] += 50
 
-        reward -= 0.01
+        # reward -= 0.01
 
         # for i in range(self.num_envs):
         #     roll, pitch, yaw = math.euler_xyz_from_quat(self._quat)
@@ -483,8 +485,8 @@ class Lander6DOFEnv(DirectRLEnv):
 
             if "reset_obs" in self.extras: # resetting the reset_obs from the last timestep
                 self.extras.pop("reset_obs")
-            # if "discount" in self.extras: #  it is from TimeLimit wrapper because there is a manual add of the 'done' so needs to be removed after use
-            #     self.extras.pop("discount")
+            if "discount" in self.extras: #  it is from TimeLimit wrapper because there is a manual add of the 'done' so needs to be removed after use
+                self.extras.pop("discount")
             self._last_terminal_obs = {k: v.clone() for k, v in obs.items()}
             self._last_terminal_extras = {k: v.clone() for k, v in self.extras.items()}
 

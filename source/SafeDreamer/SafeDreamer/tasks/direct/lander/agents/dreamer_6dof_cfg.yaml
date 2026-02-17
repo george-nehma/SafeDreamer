@@ -62,7 +62,7 @@ defaults:
   initial: 'learned'
 
   # Training
-  batch_size: 18
+  batch_size: 48
   batch_length: 128
   train_ratio: 1024
   envs: 8

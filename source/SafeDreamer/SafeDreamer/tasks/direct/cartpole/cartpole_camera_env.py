@@ -29,7 +29,7 @@ from isaaclab_assets.robots.cartpole import CARTPOLE_CFG
 class CartpoleRGBCameraEnvCfg(DirectRLEnvCfg):
     # env
     decimation = 2
-    episode_length_s = 5.0
+    episode_length_s = 10.0
     action_scale = 100.0  # [N]
     pix_x = 128
     pix_y = 128
@@ -118,6 +118,11 @@ class CartpoleCameraEnv(DirectRLEnv):
                 "The Cartpole camera environment only supports one image type at a time but the following were"
                 f" provided: {self.cfg.tiled_camera.data_types}"
             )
+        
+        self.extras["is_first"] = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.extras["is_last"] = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.extras["is_terminal"] = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self.episode_init = torch.zeros_like(self.episode_length_buf)
 
     def close(self):
         """Cleanup for the environment."""
@@ -161,23 +166,12 @@ class CartpoleCameraEnv(DirectRLEnv):
             camera_data[camera_data == float("inf")] = 0
         
         # ~~~ Regular ENV (RSL RL, SKRL etc.) ~~~ #
-        observations = {"policy": camera_data.clone()}
-
-        if self.cfg.write_image_to_file:
-            save_images_to_file(observations["policy"], f"cartpole_{data_type}.png")
+        # observations = {"policy": camera_data.clone()}
 
         # ~~~ Dreamer Observations ~~~ #
-        # reward = self._get_rewards()
+        self.extras["is_first"] = (self.episode_length_buf == self.episode_init)
 
-        # ended, time_out = self._get_dones()
-
-        # is_last = time_out
-        # is_terminal = ended
-        # is_first = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-        # dones = {"is_first": is_first, "is_last": is_last, "is_terminal": is_terminal} 
-
-        # observations = {"image": camera_data.clone(), "reward": reward}
-        # observations.update(dones)
+        observations = {"image": camera_data.clone()}
 
         return observations
 
@@ -197,18 +191,38 @@ class CartpoleCameraEnv(DirectRLEnv):
         return total_reward
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
+        obs = self._get_observations()
+
         self.joint_pos = self._cartpole.data.joint_pos
         self.joint_vel = self._cartpole.data.joint_vel
 
-        time_out = self.episode_length_buf >= self.max_episode_length - 1
-        out_of_bounds = torch.any(torch.abs(self.joint_pos[:, self._cart_dof_idx]) > self.cfg.max_cart_pos, dim=1)
-        out_of_bounds = out_of_bounds | torch.any(torch.abs(self.joint_pos[:, self._pole_dof_idx]) > math.pi / 2, dim=1)
-        return out_of_bounds, time_out
+        self.time_out = self.episode_length_buf >= self.max_episode_length - 1
+        self.out_of_bounds = torch.any(torch.abs(self.joint_pos[:, self._cart_dof_idx]) > self.cfg.max_cart_pos, dim=1)
+        self.out_of_bounds = self.out_of_bounds | torch.any(torch.abs(self.joint_pos[:, self._pole_dof_idx]) > math.pi / 2, dim=1)
+        
+        self.extras["is_last"] = self.time_out
+        self.extras["is_terminal"] = self.out_of_bounds
+
+        if self.out_of_bounds.any().item() or self.time_out.any().item():
+
+            if "reset_obs" in self.extras: # resetting the reset_obs from the last timestep
+                self.extras.pop("reset_obs")
+            if "discount" in self.extras: #  it is from TimeLimit wrapper because there is a manual add of the 'done' so needs to be removed after use
+                self.extras.pop("discount")
+            self._last_terminal_obs = {k: v.clone() for k, v in obs.items()}
+            self._last_terminal_extras = {k: v.clone() for k, v in self.extras.items()}
+
+        return self.out_of_bounds, self.time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self._cartpole._ALL_INDICES
         super()._reset_idx(env_ids)
+
+        if len(env_ids) == self.num_envs and self.num_envs > 1:
+            # Spread out the resets to avoid spikes in training when many environments reset at a similar time
+            self.episode_length_buf = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
+        self.episode_init[env_ids] = self.episode_length_buf[env_ids]
 
         joint_pos = self._cartpole.data.default_joint_pos[env_ids]
         joint_pos[:, self._pole_dof_idx] += sample_uniform(
@@ -218,6 +232,10 @@ class CartpoleCameraEnv(DirectRLEnv):
             joint_pos.device,
         )
         joint_vel = self._cartpole.data.default_joint_vel[env_ids]
+
+        self.extras["is_first"][env_ids] = True
+        self.extras["is_last"][env_ids] = False
+        self.extras["is_terminal"][env_ids] = False
 
         default_root_state = self._cartpole.data.default_root_state[env_ids]
         default_root_state[:, :3] += self.scene.env_origins[env_ids]
