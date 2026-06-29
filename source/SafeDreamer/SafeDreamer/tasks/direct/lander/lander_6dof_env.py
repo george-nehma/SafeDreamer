@@ -65,41 +65,17 @@ class Lander6DOFEnvCfg(DirectRLEnvCfg):
 
     # robot
     robot: RigidObjectCfg = LUNAR_LANDER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    # robot.spawn.rigid_props.disable_gravity = True
-    # robot: ArticulationCfg = LUNAR_LANDER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    # legs: RigidObjectCfg = RigidObjectCfg(
-    #     prim_path = "/World/envs/env_.*/Robot/FR_LEG/Cylinder",
-    #     spawn = sim_utils.CylinderCfg(
-    #         radius = 0.3,
-    #         height = 0.05,
-    #         activate_contact_sensors = True,
-    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-    #         mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
-    #         collision_props = sim_utils.CollisionPropertiesCfg(),
-    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 1.0, 0.0), metallic = 0.8),
-    #         ),
-    #         init_state = RigidObjectCfg.InitialStateCfg(),
-    # )
-    # camera
-    # camera: CameraCfg = CameraCfg(
-    #     prim_path="/World/envs/env_.*/Robot/MainBody/Camera",
-    #     offset=CameraCfg.OffsetCfg(pos=(0.0, 0.0, -2.03/2), rot=rot_utils.euler_angles_to_quats(np.array([-90, 90, 0]), degrees=True).tolist(), convention="world"),
-    #     data_types=["rgb"],
-    #     spawn=sim_utils.PinholeCameraCfg(
-    #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 20.0)
-    #     ),
-    #     width=64,
-    #     height=64,
-    # )
-    # write_image_to_file = True
 
     ui_window_class_type = Lander6DOFEnvWindow
+
+    gravity_multiplier = 3.711/1.62
+    # gravity_multiplier = 1.0
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
         dt=1 / 60,
         render_interval=decimation,
-        gravity = (0.0, 0.0, -1.62),  # [m/s^2]
+        gravity = (0.0, 0.0, -1.62 * gravity_multiplier),  # [m/s^2]
         physx=PhysxCfg(
             min_position_iteration_count=4,
             min_velocity_iteration_count=2,
@@ -160,8 +136,8 @@ class Lander6DOFEnvCfg(DirectRLEnvCfg):
 
     # spaces
     action_space = 6 # 3D translational Fx,Fy,Fz,Mx,My,Mz
-    state_space = 14
-    observation_space = state_space # q0, q1, q2, q3, pos x, pos y, pos z, vel x, vel y, vel z, om_x, om_y, om_z, contact bool,
+    state_space = 17 # q0, q1, q2, q3, pos x, pos y, pos z, vel x, vel y, vel z, om_x, om_y, om_z, grav_x, grav_y, grav_z, contact bool
+    observation_space = state_space # q0, q1, q2, q3, pos x, pos y, pos z, vel x, vel y, vel z, om_x, om_y, om_z, gx, gy, gz, contact bool,
 
     # reward scales
     lin_vel_reward_scale = -1.3
@@ -193,19 +169,13 @@ class Lander6DOFEnv(DirectRLEnv):
     def __init__(self, cfg: Lander6DOFEnvCfg, render_mode: str | None = None, **kwargs):
         super().__init__(cfg, render_mode, **kwargs)
 
-        self.actionLow = np.full(self.action_space.shape, -3136, dtype=np.float32) # min thrust of RCS thrusters [N] and moment [Nm] 4*400N*1.96m
-        self.actionHigh = np.full(self.action_space.shape, 3136, dtype=np.float32) # max thrust of RCS thrusters [N] and moment [Nm] 4*400N*1.96m
-        self.actionLow[:,0] = -800.0 
-        self.actionHigh[:,0] = 800.0
-        self.actionLow[:,1] = -800.0
-        self.actionHigh[:,1] = 800.0
-        self.actionLow[:,2] = 4600.0
-        self.actionHigh[:,2] = 43000.0
+        self.actionLow = np.full(self.action_space.shape, -cfg.gravity_multiplier * 3136, dtype=np.float32) # min thrust of RCS thrusters [N] and moment [Nm] 4*400N*1.96m
+        self.actionHigh = np.full(self.action_space.shape, cfg.gravity_multiplier * 3136, dtype=np.float32) # max thrust of RCS thrusters [N] and moment [Nm] 4*400N*1.96m
+        self.actionLow[:,0:2] = -800.0 * cfg.gravity_multiplier
+        self.actionHigh[:,0:2] = 800.0 * cfg.gravity_multiplier
+        self.actionLow[:,2] = 4600.0 * cfg.gravity_multiplier 
+        self.actionHigh[:,2] = 43000.0 * cfg.gravity_multiplier
         self.action_space = gym.spaces.Box(dtype=np.float32, shape=self.actionHigh.shape ,low=self.actionLow, high=self.actionHigh)
-        self.prev_action = torch.zeros(self.action_space.shape, device=self.device)
-        self.d_action = torch.zeros(self.action_space.shape, device=self.device)
-        self._contact_history = torch.zeros((self.num_envs, 5), dtype=torch.bool, device=self.device)
-        self._alignment_prev = torch.zeros(self.num_envs, device=self.device)
         self.landed_hist = 0
         self.crashed_hist = 0
         self.align_land_hist = 0
@@ -214,9 +184,9 @@ class Lander6DOFEnv(DirectRLEnv):
         self.OOB_hist = 0
         self.time_out_hist = 0
 
-        state_space = list(self.state_space.shape)
-        state_space[1] -= 1 
-        self._initial_state = torch.zeros(tuple(state_space), device=self.device) 
+        # state_space = list(self.state_space.shape)
+        # state_space[1] -= 1 
+        # self._initial_state = torch.zeros(tuple(state_space), device=self.device) 
 
         self.extras["is_first"] = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.extras["is_last"] = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -252,16 +222,10 @@ class Lander6DOFEnv(DirectRLEnv):
 
     def _setup_scene(self):
         self._robot = RigidObject(self.cfg.robot)
-        # self._legs = RigidObject(self.cfg.legs)
-        # self._robot = Articulation(self.cfg.robot)
-        # self.scene.articulations["robot"] = self._robot
-        # self._camera = Camera(self.cfg.camera)
         self._height_scanner = RayCaster(self.cfg.height_scanner)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
         self._imu = Imu(self.cfg.imu)
         self.scene.rigid_objects["robot"] = self._robot
-        # self.scene.rigid_objects["legs"] = self._legs
-        # self.scene.sensors["camera"] = self._camera
         self.scene.sensors["height_scanner"] = self._height_scanner
         self.scene.sensors["contact_forces"] = self._contact_sensor
         self.scene.sensors["imu"] = self._imu
@@ -317,8 +281,6 @@ class Lander6DOFEnv(DirectRLEnv):
         self._lin_vel = math.quat_apply(self._quat, self._imu.data.lin_vel_b + torch.normal(0,0.01, size=(self.num_envs,3), device=self.device))
         self._ang_vel = self._imu.data.ang_vel_b + torch.normal(0,0.0007, size=(self.num_envs,3), device=self.device)
         
-        # in_contact = self._contact_sensor.compute_in_contact(dt=self.cfg.decimation*self.cfg.sim.dt)
-        # self._contact = in_contact.squeeze(1).any(dim=-1)  # per-env flag
         self._contact = (self._contact_sensor.data.current_contact_time.squeeze(1) > 0.01) #self._contact_sensor.data.current_contact_time.squeeze(1)
 
         self.obs = torch.cat(
@@ -327,6 +289,7 @@ class Lander6DOFEnv(DirectRLEnv):
                 self._pos.view(self.num_envs, -1),       # [n, 3]
                 self._lin_vel.view(self.num_envs, -1),           # [n, 3]
                 self._ang_vel.view(self.num_envs, -1),           # [n, 3]
+                math.quat_apply(self._quat, self._robot.data.projected_gravity_b).view(self.num_envs, -1),     # [n, 3]
                 self._contact.view(self.num_envs, -1),           # [4, 3]  ← squeeze out the 2nd dim
             ],
             dim=1
@@ -344,8 +307,6 @@ class Lander6DOFEnv(DirectRLEnv):
         self.alignment = 2.0 * torch.atan2(torch.norm(e_qv, dim=1), torch.abs(e_q0.squeeze(1)))
         self.alignment = torch.clamp(self.alignment, 0.0, torch.pi)
         self._aligned = self.alignment < 5.7e-2
-        self.omega = torch.norm(self._ang_vel, dim=1)
-        self._alignment_prev = self.alignment.clone()
 
         return observations
     
@@ -395,14 +356,11 @@ class Lander6DOFEnv(DirectRLEnv):
         reward[self._crashed] -= 20
         reward[self._hard_landing] -= 40
         reward[self._missed] -= 5
-        # hovering_pen = 0.00001*self._actions[(pos_ok & (self._altitude<1.0)),2]
-        # reward[(pos_ok & (self._altitude<1.0))] -= hovering_pen
         reward[((torch.abs(self._lin_vel[:,2]) > self.cfg.vlim) & (self._altitude<5.0))] -= 0.01
 
         reward[self._aligned & self._landed] += 50
 
-        # reward -= 0.01
-
+        # --- DEBUG ---# 
         # for i in range(self.num_envs):
         #     roll, pitch, yaw = math.euler_xyz_from_quat(self._quat)
         #     if self._aligned[i] & self._landed[i]:
@@ -480,7 +438,6 @@ class Lander6DOFEnv(DirectRLEnv):
         self.extras["is_last"] = self.time_out
         self.extras["is_terminal"] = self.terminated
 
-        # print(f"Landed: {self._landed}, Crashed: {self._crashed}, OOB: {self.out_of_bounds}")
         if self.terminated.any().item() or self.time_out.any().item():
 
             if "reset_obs" in self.extras: # resetting the reset_obs from the last timestep
@@ -492,6 +449,7 @@ class Lander6DOFEnv(DirectRLEnv):
 
             with torch.no_grad():
 
+                # --- DEBUG SUMMARY --- #
                 # Summary statistics (mean/std)
                 # print(f"\n=== Reward Diagnostics ===")
                 # print(f"Attitude term:       mean={alignment_penalty.mean():.3f}, std={alignment_penalty.std():.3f}")
@@ -518,7 +476,6 @@ class Lander6DOFEnv(DirectRLEnv):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self._robot._ALL_INDICES
 
-        self._contact_history[env_ids,:] = False
         # Logging
         final_distance_to_goal = torch.linalg.norm(
             self._desired_pos_w[env_ids] - self._robot.data.root_pos_w[env_ids], dim=1
@@ -526,19 +483,6 @@ class Lander6DOFEnv(DirectRLEnv):
         self.extras["is_first"][env_ids] = True
         self.extras["is_last"][env_ids] = False
         self.extras["is_terminal"][env_ids] = False
-        # extras = dict()
-        # for key in self._episode_sums.keys():
-        #     episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-        #     extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
-        #     self._episode_sums[key][env_ids] = 0.0
-        # self.extras["log"] = dict()
-        # self.extras["log"].update(extras)
-        # extras = dict()
-        # extras["Episode_Termination/died"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
-        # extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
-        # extras["Metrics/final_distance_to_goal"] = final_distance_to_goal.item()
-        # self.extras["log"].update(extras)
-
 
         self._robot.reset(env_ids) # necessary for isaaclab
         self._imu.reset(env_ids) # necessary for isaaclab
@@ -554,22 +498,20 @@ class Lander6DOFEnv(DirectRLEnv):
         self._desired_pos_w[env_ids, 0] = 0
         self._desired_pos_w[env_ids, 1] = -0
         self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(0, 0)
+
         # Reset robot state
-        # joint_pos = self._robot.data.default_joint_pos[env_ids]
-        # joint_vel = self._robot.data.default_joint_vel[env_ids]
         init_euler = torch.zeros(len(env_ids), 3, device=self.device).uniform_(-10*np.pi/180, 10*np.pi/180) # roll, pitch, yawv +- 5 degrees
         default_root_state = self._robot.data.default_root_state[env_ids]
-        default_root_state[:, :2] += torch.zeros_like(default_root_state[:, :2]).uniform_(-20,20)#(-20.0, 20.0) # x and y position
-        default_root_state[:, 2] += torch.zeros_like(default_root_state[:, 2]).uniform_(110,130)#(0.0, 20.0) # z position
+        default_root_state[:, :2] += torch.zeros_like(default_root_state[:, :2]).uniform_(-20,20) # x and y position
+        default_root_state[:, 2] += torch.zeros_like(default_root_state[:, 2]).uniform_(110,130) # z position
         default_root_state[:, 3:7] = math.quat_from_euler_xyz(init_euler[:,0], init_euler[:,1], init_euler[:,2])  # random orientation
         default_root_state[:, 7:9] += torch.zeros_like(default_root_state[:, 7:9]).uniform_(-2.0, 2.0) # x and y linear velocity
         default_root_state[:, 9] += torch.zeros_like(default_root_state[:, 9]).uniform_(-5.0, -1.0) # z linear velocity
         default_root_state[:, 10:13] += torch.zeros_like(default_root_state[:, 10:13]).uniform_(-0.035, 0.035) # angular velocity
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
-        self._initial_state[env_ids] = default_root_state
+        # self._initial_state[env_ids] = default_root_state
         self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
-        # self._robot.write_joint_state_to_sim(joint_pos, joint_vel, None, env_ids)
 
     def _set_debug_vis_impl(self, debug_vis: bool):
         # create markers if necessary for the first time

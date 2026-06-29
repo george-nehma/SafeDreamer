@@ -15,6 +15,8 @@ class IsaacLabDreamerWrapper(gym.Wrapper):
         super().__init__(env)
         self.env = env
         self.obs_keys = obs_keys
+        # self.term_obs_buffer = None       # stores terminal obs
+        # self.reset_obs_buffer = None      # stores reset obs
 
         # Detect number of parallel envs
         self.num_envs = env.env.num_envs
@@ -93,10 +95,7 @@ class IsaacLabDreamerWrapper(gym.Wrapper):
             # self.term_obs_buffer = term_obs            
             # self.reset_obs_buffer = reset_obs
            
-            if 'state' in term_obs:
-                obs['state'] = term_obs['state']
-            if 'image' in term_obs:
-                obs['image'] = term_obs['image']
+            obs['state'] = term_obs['state']
             obs['reward'] = reward
             obs['is_first'] = term_extras["is_first"]
             obs['is_last'] = term_extras["is_last"]
